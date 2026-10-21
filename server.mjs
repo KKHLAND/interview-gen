@@ -14,7 +14,21 @@ try { process.loadEnvFile(path.join(here, ".env")); } catch { /* .env 없음 */ 
 const PORT = Number(process.env.PORT || 5178);
 const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 const API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-const ai = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null;
+
+// 키 우선순위: 브라우저 설정 창에서 입력한 키(x-gemini-key 헤더) → 서버 .env 키
+const clients = new Map();
+function clientFor(key) {
+  if (!key) return null;
+  if (!clients.has(key)) {
+    if (clients.size > 20) clients.clear();
+    clients.set(key, new GoogleGenAI({ apiKey: key }));
+  }
+  return clients.get(key);
+}
+function keyFrom(req) {
+  const h = String(req.headers["x-gemini-key"] || "").trim();
+  return /^[\w.\-]{20,200}$/.test(h) ? h : API_KEY;
+}
 
 // ---------------- 프롬프트 ----------------
 const COMPETENCIES = ["학업역량", "탐구역량", "진로·전공역량", "자기주도성", "창의·비판적 사고", "협력·공동체", "의사소통", "성찰·성장"];
@@ -140,7 +154,7 @@ function genConfig(schema, extra = {}) {
   };
 }
 
-async function generateJSON(prompt, schema, extra) {
+async function generateJSON(ai, prompt, schema, extra) {
   const res = await ai.models.generateContent({ model: MODEL, contents: prompt, config: genConfig(schema, extra) });
   return parseJSON(res.text);
 }
@@ -155,19 +169,29 @@ function parseJSON(text) {
 
 // ---------------- 라우트 ----------------
 const routes = {
-  "GET /api/health": async () => ({ ok: true, model: MODEL, keyConfigured: !!ai }),
+  "GET /api/health": async () => ({ ok: true, model: MODEL, keyConfigured: !!API_KEY }),
 
-  "POST /api/review": async (b) => {
+  // 연결 테스트: 아주 짧은 생성 요청으로 키·모델·할당량을 한 번에 확인
+  "POST /api/test-key": async (b, ai, req) => {
+    const key = String(b.key || "").trim();
+    const client = key ? clientFor(key) : ai;
+    if (!client) throw httpError(400, "테스트할 API 키가 없습니다.");
+    const t0 = Date.now();
+    const res = await client.models.generateContent({ model: MODEL, contents: "연결 테스트입니다. 'OK'라고만 답하세요.", config: { maxOutputTokens: 256 } });
+    return { ok: true, model: MODEL, modelVersion: res.modelVersion || MODEL, ms: Date.now() - t0, source: key ? "browser" : keyFrom(req) === API_KEY ? "server" : "browser", reply: (res.text || "").trim().slice(0, 40) };
+  },
+
+  "POST /api/review": async (b, ai) => {
     const prompt = `[지원 정보] ${targetLine(b.target)}
 
 입학사정관 관점에서 아래 생기부를 6개 영역별로 평가하고, 8대 평가요소(${COMPETENCIES.join(", ")}) 점수와 지원 학과 적합도를 산출하세요. 점수는 상대적으로 엄정하게 매기고, 근거는 기록에서 찾으세요.
 
 [학교생활기록부 — 6개 영역 발췌]
 ${b.record}`;
-    return generateJSON(prompt, reviewSchema);
+    return generateJSON(ai, prompt, reviewSchema);
   },
 
-  "POST /api/question": async (b) => {
+  "POST /api/question": async (b, ai) => {
     const q = b.question || {};
     const how = b.instruction ? `사용자 요청: "${String(b.instruction).slice(0, 500)}"` : "같은 근거를 다른 각도에서 묻는 새로운 질문으로 바꾸세요. 기존 질문과 겹치지 않게 하세요.";
     const prompt = `[지원 정보] ${targetLine(b.target)}
@@ -181,10 +205,10 @@ ${(b.others || []).slice(0, 60).map((s) => "- " + s).join("\n")}
 
 [학교생활기록부 — 6개 영역 발췌]
 ${b.record}`;
-    return generateJSON(prompt, questionItem);
+    return generateJSON(ai, prompt, questionItem);
   },
 
-  "POST /api/feedback": async (b) => {
+  "POST /api/feedback": async (b, ai) => {
     const prompt = `[지원 정보] ${targetLine(b.target)}
 
 모의 면접입니다. 아래 질문에 대한 지원자의 실제 답변을 입학사정관으로서 평가하세요. 구체성, 생기부 근거 활용, 전공 연결, 논리 구조, 진정성을 봅니다. 답변이 짧거나 비어 있으면 엄정하게 평가합니다.
@@ -195,10 +219,10 @@ ${b.record}`;
 
 [학교생활기록부 — 6개 영역 발췌]
 ${b.record}`;
-    return generateJSON(prompt, feedbackSchema);
+    return generateJSON(ai, prompt, feedbackSchema);
   },
 
-  "POST /api/university": async (b) => {
+  "POST /api/university": async (b, ai) => {
     const t = b.target || {};
     if (!t.university && !t.major) throw httpError(400, "대학 또는 학과를 입력하세요.");
     const prompt = `${t.university || ""} ${t.major || ""} 학생부종합전형 면접 준비를 위해 최신 공식 정보를 검색해 정리하세요.
@@ -223,7 +247,7 @@ ${b.record}`;
 };
 
 // 질문 대량 생성은 스트리밍(NDJSON)으로 진행 상황을 보낸다
-async function streamQuestions(b, res) {
+async function streamQuestions(b, res, ai) {
   res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" });
   const send = (o) => res.write(JSON.stringify(o) + "\n");
   try {
@@ -246,6 +270,10 @@ async function streamQuestions(b, res) {
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
 function errorMessage(e) {
   if (e instanceof ApiError) {
+    const m = String(e.message || "");
+    if (/API[_ ]?key|API_KEY_INVALID|credential|unauthenticated/i.test(m)) return "API 키가 올바르지 않습니다. 키를 다시 복사해 붙여넣었는지 확인하세요.";
+    if (/billing|FAILED_PRECONDITION/i.test(m)) return "이 키의 프로젝트에서 Gemini API를 쓸 수 없습니다. AI Studio에서 결제 또는 프로젝트 설정을 확인하세요.";
+    if (/location|region/i.test(m)) return "현재 지역에서 이 모델을 사용할 수 없습니다.";
     if (e.status === 400) return "요청이 거부되었습니다 (400). 모델 이름이나 입력을 확인하세요.";
     if (e.status === 401 || e.status === 403) return "Gemini API 키가 올바르지 않거나 권한이 없습니다.";
     if (e.status === 404) return `모델(${MODEL})을 찾을 수 없습니다. GEMINI_MODEL 설정을 확인하세요.`;
@@ -293,13 +321,15 @@ const server = http.createServer(async (req, res) => {
   };
   try {
     if (url.pathname.startsWith("/api/")) {
-      if (key !== "GET /api/health" && !ai) return json(503, { error: "GEMINI_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요." });
-      if (key === "POST /api/questions") return streamQuestions(await readBody(req), res);
+      const ai = clientFor(keyFrom(req));
+      const keyless = key === "GET /api/health" || key === "POST /api/test-key";
+      if (!keyless && !ai) return json(401, { error: "Gemini API 키가 없습니다. 오른쪽 위 ‘API 키’에서 설정하세요.", needKey: true });
+      if (key === "POST /api/questions") return streamQuestions(await readBody(req), res, ai);
       const handler = routes[key];
       if (!handler) return json(404, { error: "not found" });
       const body = req.method === "POST" ? await readBody(req) : {};
-      if (req.method === "POST" && key !== "POST /api/university" && !body.record) return json(400, { error: "생기부 데이터가 없습니다." });
-      return json(200, await handler(body));
+      if (req.method === "POST" && !keyless && key !== "POST /api/university" && !body.record) return json(400, { error: "생기부 데이터가 없습니다." });
+      return json(200, await handler(body, ai, req));
     }
     // 정적 파일
     let file = STATIC[url.pathname];
@@ -319,5 +349,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`생기부 맞춤 면접 Lab → http://localhost:${PORT}  (model: ${MODEL}${ai ? "" : ", API 키 없음"})`);
+  console.log(`생기부 맞춤 면접 Lab → http://localhost:${PORT}  (model: ${MODEL}${API_KEY ? ", 서버 키 사용" : ", 브라우저에서 API 키 설정 필요"})`);
 });

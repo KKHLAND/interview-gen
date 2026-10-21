@@ -61,6 +61,10 @@ const ICONS = {
   next: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   check: '<path d="M5 12l5 5L20 7"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L21 2M16 7l3 3M18.5 4.5l2 2"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  zap: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/>',
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ""}</svg>`;
 const hydrateIcons = (root = document) => $$("[data-icon]", root).forEach((el) => { el.innerHTML = icon(el.dataset.icon); el.removeAttribute("data-icon"); });
@@ -79,10 +83,150 @@ function target() {
 }
 
 async function api(path, body) {
-  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `요청 실패 (${res.status})`);
+  if (!res.ok) {
+    if (data.needKey) openKeyDialog();
+    else if (res.status === 401 || /API 키/.test(data.error || "")) setKeyState("bad");
+    throw new Error(data.error || `요청 실패 (${res.status})`);
+  }
   return data;
+}
+
+// ---------------- Gemini API 키 ----------------
+// 키는 이 브라우저(localStorage 또는 sessionStorage)에만 두고, 요청마다 로컬 서버로 헤더 전달한다.
+const KEY_STORE = "gemini_api_key";
+let serverHasKey = false;
+let keyState = "none"; // none | unknown | ok | bad
+function getKey() {
+  try { return sessionStorage.getItem(KEY_STORE) || localStorage.getItem(KEY_STORE) || ""; } catch { return ""; }
+}
+function storeKey(k, keep) {
+  try {
+    localStorage.removeItem(KEY_STORE); sessionStorage.removeItem(KEY_STORE);
+    if (k) (keep === "session" ? sessionStorage : localStorage).setItem(KEY_STORE, k);
+  } catch {}
+}
+function authHeaders() { const k = getKey(); return k ? { "x-gemini-key": k } : {}; }
+function hasAnyKey() { return !!getKey() || serverHasKey; }
+const maskKey = (k) => (k.length > 12 ? `${k.slice(0, 5)}…${k.slice(-4)}` : "••••");
+
+function setKeyState(s) {
+  keyState = s;
+  const dot = $("#keyDot"), label = $("#keyLabel");
+  dot.className = "kdot" + (s === "ok" ? " ok" : s === "unknown" ? " wait" : "");
+  label.textContent = s === "ok" ? "Gemini 연결됨" : s === "bad" ? "API 키 확인 필요" : s === "unknown" ? "API 키" : "API 키 설정";
+  $("#keyBtn").title = s === "ok" ? "Gemini API 연결 정상 · 클릭해서 키 변경" : "Gemini API 키 설정";
+  const hint = $("#runHint");
+  if (hint) hint.innerHTML = hasAnyKey() ? "생기부 리뷰와 맞춤 면접 질문을 동시에 만듭니다." : `먼저 <a href="#" id="hintKey">Gemini API 키를 설정</a>하세요.`;
+  $("#hintKey")?.addEventListener("click", (e) => { e.preventDefault(); openKeyDialog(); });
+}
+
+function keyFormat(k) {
+  if (!k) return ["", ""];
+  if (/\s/.test(k)) return ["warn", "키 중간에 공백이나 줄바꿈이 있습니다. 다시 복사해 보세요."];
+  if (k.startsWith("AQ.")) return ["ok", "✓ 새 형식(AQ.) Gemini API 키입니다."];
+  if (k.startsWith("AIza")) return ["ok", "✓ 이전 형식(AIza) API 키입니다. 그대로 사용할 수 있습니다."];
+  return ["warn", "Gemini 키는 보통 <code>AQ.</code> 또는 <code>AIza</code>로 시작합니다. 맞는 키인지 확인하세요."];
+}
+
+function showTest(kind, title, sub) {
+  const box = $("#testBox");
+  box.hidden = false;
+  box.className = "test-box " + kind;
+  box.innerHTML = `${kind === "run" ? '<span class="spin"></span>' : icon(kind === "ok" ? "check" : "alert")}<div><b>${title}</b>${sub ? `<p>${sub}</p>` : ""}</div>`;
+}
+
+async function testKey(k) {
+  showTest("run", "연결 테스트 중…", "Gemini에 짧은 요청을 보내 키와 모델을 확인합니다.");
+  try {
+    const res = await fetch("/api/test-key", { method: "POST", headers: { "Content-Type": "application/json", ...(k ? {} : authHeaders()) }, body: JSON.stringify({ key: k }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || `연결 실패 (${res.status})`);
+    showTest("ok", "연결 성공! 바로 사용할 수 있습니다.", `모델 <b style="display:inline">${esc(d.modelVersion)}</b> · 응답 ${(d.ms / 1000).toFixed(1)}초${d.source === "server" ? " · 서버(.env) 키 사용" : ""}`);
+    return true;
+  } catch (e) {
+    const tip = /한도/.test(e.message) ? "무료 등급 한도일 수 있습니다. 1분 뒤 다시 시도하거나 결제를 연결하세요."
+      : /키가 올바르지/.test(e.message) ? "AI Studio에서 키를 다시 복사해 붙여넣어 보세요. 삭제된 키는 사용할 수 없습니다."
+      : /Failed to fetch|NetworkError/i.test(e.message) ? "로컬 서버(npm start)가 실행 중인지 확인하세요." : "";
+    showTest("bad", esc(e.message), tip);
+    return false;
+  }
+}
+
+function openKeyDialog() {
+  const dlg = $("#keyDlg");
+  const k = getKey();
+  const input = $("#keyInput");
+  input.value = k;
+  input.type = "password";
+  let keep = "local";
+  try { if (sessionStorage.getItem(KEY_STORE)) keep = "session"; } catch {}
+  $$('input[name="keep"]', dlg).forEach((r) => (r.checked = r.value === keep));
+  $("#testBox").hidden = true;
+  if (keyState === "ok") showTest("ok", "현재 연결되어 있습니다.", k ? `저장된 키 ${esc(maskKey(k))}` : "서버(.env) 키 사용 중");
+  else if (!k && serverHasKey) showTest("ok", "서버(.env)에 키가 설정되어 있습니다.", "따로 입력하지 않아도 됩니다. 다른 키를 쓰려면 아래에 입력하세요.");
+  updateFmt();
+  if (!dlg.open) dlg.showModal();
+  setTimeout(() => input.focus(), 50);
+}
+function updateFmt() {
+  const [cls, msg] = keyFormat($("#keyInput").value.trim());
+  const el = $("#keyFmt");
+  el.className = "key-fmt " + cls;
+  el.innerHTML = msg;
+}
+
+function initKeyDialog() {
+  const input = $("#keyInput");
+  $("#keyBtn").onclick = openKeyDialog;
+  input.oninput = updateFmt;
+  input.addEventListener("paste", () => setTimeout(() => { input.value = input.value.trim(); updateFmt(); }, 0));
+  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); $("#keySave").click(); } };
+  $("#keyEye").onclick = () => { input.type = input.type === "password" ? "text" : "password"; $("#keyEye").innerHTML = icon(input.type === "password" ? "eye" : "lock"); };
+  $("#keyTest").onclick = async () => {
+    const k = input.value.trim();
+    if (!k && !serverHasKey) { showTest("bad", "키를 먼저 붙여넣으세요.", "1~3단계를 따라 AI Studio에서 키를 만들 수 있습니다."); return input.focus(); }
+    $("#keyTest").disabled = true;
+    await testKey(k);
+    $("#keyTest").disabled = false;
+  };
+  $("#keySave").onclick = async () => {
+    const k = input.value.trim();
+    if (!k) {
+      if (serverHasKey) { storeKey(""); $("#keyDlg").close(); setKeyState("unknown"); return toast("서버(.env) 키를 사용합니다."); }
+      showTest("bad", "키를 먼저 붙여넣으세요.", "");
+      return input.focus();
+    }
+    const btn = $("#keySave");
+    btn.disabled = true; btn.textContent = "확인 중…";
+    const ok = await testKey(k);
+    btn.disabled = false; btn.textContent = "테스트 후 저장";
+    if (!ok) return;
+    storeKey(k, $('input[name="keep"]:checked').value);
+    setKeyState("ok");
+    setTimeout(() => $("#keyDlg").close(), 700);
+    toast("API 키를 저장했습니다. 이제 AI 분석을 시작할 수 있어요.");
+  };
+  $("#keyClear").onclick = () => {
+    if (!getKey() && !input.value) return;
+    if (!confirm("이 브라우저에 저장된 API 키를 삭제할까요?")) return;
+    storeKey("");
+    input.value = "";
+    updateFmt();
+    $("#testBox").hidden = true;
+    setKeyState(serverHasKey ? "unknown" : "none");
+    toast("API 키를 삭제했습니다.");
+  };
+}
+
+async function silentKeyCheck() {
+  if (!hasAnyKey()) return setKeyState("none");
+  setKeyState("unknown");
+  try {
+    const res = await fetch("/api/test-key", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: "{}" });
+    setKeyState(res.ok ? "ok" : "bad");
+  } catch { setKeyState("unknown"); }
 }
 
 // ---------------- 테마 ----------------
@@ -182,6 +326,7 @@ function syncRunBtn() {
 
 async function runAll() {
   if (!S.recordText.trim()) return toast("전송할 생기부 데이터가 없습니다.", true);
+  if (!hasAnyKey()) { toast("먼저 Gemini API 키를 설정하세요."); return openKeyDialog(); }
   if (S.questions.length && !confirm("기존 질문을 새로 생성한 질문으로 바꿉니다. 계속할까요?")) return;
   runReview();
   runQuestions();
@@ -204,10 +349,10 @@ async function runQuestions() {
   try {
     const res = await fetch("/api/questions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ record: S.recordText, target: target(), count: S.opts.count, focus: [...S.opts.focus], followDepth: S.opts.depth, includeBasic: S.opts.basic }),
     });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `요청 실패 (${res.status})`); }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); if (d.needKey) openKeyDialog(); throw new Error(d.error || `요청 실패 (${res.status})`); }
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = "", done = false;
@@ -764,10 +909,12 @@ async function init() {
   $("#privacyBtn").onclick = () => $("#privacyDlg").showModal();
   ["#univ", "#major"].forEach((s) => $(s).addEventListener("change", () => S.tab === "univ" && renderUniv()));
   window.addEventListener("beforeunload", (e) => { if (S.questions.length) { e.preventDefault(); e.returnValue = ""; } });
+  initKeyDialog();
   try {
     const h = await fetch("/api/health").then((r) => r.json());
-    $("#modelChip").textContent = h.model;
-    if (!h.keyConfigured) { $("#modelChip").textContent = "API 키 없음"; $("#modelChip").style.color = "var(--bad)"; $("#runHint").textContent = "서버에 GEMINI_API_KEY가 없습니다. .env 파일을 설정하세요."; }
+    serverHasKey = !!h.keyConfigured;
+    $("#keyBtn").dataset.model = h.model;
   } catch {}
+  silentKeyCheck();
 }
 init();

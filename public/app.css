@@ -329,6 +329,54 @@ ul.dots.num li::before { counter-increment: n; content: counter(n); width: 18px;
 .src a:hover { color: var(--accent-text); }
 .src a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* API 키 */
+.chip-key { cursor: pointer; font-weight: 600; }
+.chip-key:hover { border-color: var(--line-strong); color: var(--text); }
+.kdot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 18%, transparent); }
+.kdot.ok { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
+.kdot.wait { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent); }
+.dlg-key { max-width: 600px; }
+.dlg-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dlg-top h3 { margin: 0; }
+.dlg-top h3 svg.i { color: var(--accent); }
+.dlg-lead { margin: 8px 0 16px; color: var(--text-2); font-size: 14px; }
+.steps { list-style: none; padding: 0; margin: 0 0 18px; display: flex; flex-direction: column; gap: 10px; }
+.steps li { display: flex; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); }
+.steps .sn { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 8px; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 800; }
+.steps b { font-size: 14.5px; }
+.steps p { margin: 2px 0 0; font-size: 13px; color: var(--text-2); }
+.steps code, .key-fmt code { padding: 1px 6px; border-radius: 6px; background: var(--surface-3); font: 600 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent-text); }
+.link-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 7px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); color: var(--accent-text); font-size: 13px; font-weight: 700; text-decoration: none; }
+.link-btn:hover { border-color: var(--accent); }
+.link-btn svg.i { width: 15px; height: 15px; }
+.key-row { display: flex; gap: 6px; }
+.key-row input { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; }
+.key-row .btn-ghost { height: 42px; width: 42px; justify-content: center; padding: 0; }
+.key-fmt { min-height: 18px; font-size: 12.5px; color: var(--text-3); }
+.key-fmt.ok { color: var(--ok); }
+.key-fmt.warn { color: var(--warn); }
+.remember { display: flex; gap: 16px; flex-wrap: wrap; margin: -4px 0 14px; font-size: 13.5px; color: var(--text-2); }
+.remember label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.remember input { accent-color: var(--accent); }
+.test-box { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; margin-bottom: 14px; font-size: 13.5px; animation: fade .2s ease; }
+.test-box b { display: block; font-size: 14px; margin-bottom: 2px; }
+.test-box p { margin: 0; color: var(--text-2); }
+.test-box.ok { background: var(--ok-soft); }
+.test-box.ok > svg.i { color: var(--ok); }
+.test-box.bad { background: var(--bad-soft); }
+.test-box.bad > svg.i { color: var(--bad); }
+.test-box.run { background: var(--surface-2); }
+.spin { width: 18px; height: 18px; flex: none; border-radius: 50%; border: 2.5px solid var(--line-strong); border-top-color: var(--accent); animation: rot .8s linear infinite; }
+@keyframes rot { to { transform: rotate(360deg); } }
+.dlg-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dlg-actions .grow { flex: 1; }
+.dlg .dlg-actions .btn-primary { width: auto; height: 40px; }
+.dlg-actions .btn-ghost { height: 40px; }
+.key-help { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; font-size: 13px; }
+.key-help summary { cursor: pointer; font-weight: 650; color: var(--text-2); }
+.key-help ul { margin: 10px 0 0 !important; gap: 7px !important; font-size: 13px !important; }
+.key-help a { color: var(--accent-text); }
+
 /* 대화상자·토스트 */
 .dlg { max-width: 560px; width: calc(100% - 32px); border: 1px solid var(--line); border-radius: 20px; padding: 26px; background: var(--surface); color: var(--text); box-shadow: 0 30px 80px -20px rgba(0,0,0,.4); }
 .dlg::backdrop { background: rgba(12, 14, 24, .45); backdrop-filter: blur(3px); }

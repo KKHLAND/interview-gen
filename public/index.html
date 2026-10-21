@@ -18,7 +18,7 @@
       </a>
       <div class="topbar-actions">
         <button class="chip chip-safe" id="privacyBtn" type="button"><span data-icon="shield"></span><span class="lbl">개인정보 보호 안내</span></button>
-        <span class="chip chip-model" id="modelChip" title="사용 중인 AI 모델">Gemini</span>
+        <button class="chip chip-key" id="keyBtn" type="button" title="Gemini API 키 설정"><span class="kdot" id="keyDot"></span><span data-icon="key"></span><span id="keyLabel">API 키</span></button>
         <button class="icon-btn" id="themeBtn" type="button" aria-label="화면 테마 전환"><span data-icon="moon"></span></button>
       </div>
     </div>
@@ -142,6 +142,71 @@
         <li class="warn">Gemini <b>무료 등급</b> API 키를 쓰면 Google이 입력을 서비스 개선에 활용할 수 있습니다. 실제 학생 자료에는 <b>유료(결제) 등급</b> 키를 권장합니다.</li>
       </ul>
       <button class="btn-primary" value="close">확인했습니다</button>
+    </form>
+  </dialog>
+
+  <dialog id="keyDlg" class="dlg dlg-key">
+    <form method="dialog" id="keyForm">
+      <div class="dlg-top">
+        <h3><span data-icon="key"></span>Gemini API 키 설정</h3>
+        <button class="icon-btn" value="close" aria-label="닫기" formnovalidate><span data-icon="x"></span></button>
+      </div>
+      <p class="dlg-lead">이 앱은 Google Gemini로 질문과 답변을 만듭니다. 키는 무료로 1분이면 발급받을 수 있어요.</p>
+
+      <ol class="steps">
+        <li>
+          <span class="sn">1</span>
+          <div><b>Google AI Studio 열기</b>
+            <p>Google 계정으로 로그인합니다. 처음이면 이용약관에 동의하세요.</p>
+            <a class="link-btn" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"><span data-icon="link"></span>aistudio.google.com/apikey 열기</a>
+          </div>
+        </li>
+        <li>
+          <span class="sn">2</span>
+          <div><b>‘API 키 만들기(Create API key)’ 클릭</b>
+            <p>프로젝트를 고르라는 창이 뜨면 기본 프로젝트를 선택하거나 새로 만듭니다.</p>
+          </div>
+        </li>
+        <li>
+          <span class="sn">3</span>
+          <div><b>만들어진 키를 복사해 아래에 붙여넣기</b>
+            <p>요즘 발급되는 키는 <code>AQ.</code>으로 시작합니다. (예전 키는 <code>AIza</code>로 시작)</p>
+          </div>
+        </li>
+      </ol>
+
+      <div class="field key-field">
+        <label for="keyInput">API 키</label>
+        <div class="key-row">
+          <input id="keyInput" type="password" placeholder="AQ.로 시작하는 키를 붙여넣으세요" autocomplete="off" spellcheck="false" />
+          <button class="btn-ghost" type="button" id="keyEye" aria-label="키 보기"><span data-icon="eye"></span></button>
+        </div>
+        <small class="key-fmt" id="keyFmt"></small>
+      </div>
+
+      <div class="remember">
+        <label><input type="radio" name="keep" value="local" checked /> 이 브라우저에 기억</label>
+        <label><input type="radio" name="keep" value="session" /> 이번 탭에서만 사용</label>
+      </div>
+
+      <div class="test-box" id="testBox" hidden></div>
+
+      <div class="dlg-actions">
+        <button class="btn-ghost" type="button" id="keyClear">키 삭제</button>
+        <span class="grow"></span>
+        <button class="btn-ghost" type="button" id="keyTest"><span data-icon="zap"></span>연결 테스트</button>
+        <button class="btn-primary" type="button" id="keySave">테스트 후 저장</button>
+      </div>
+
+      <details class="key-help">
+        <summary>도움말 · 비용과 보안</summary>
+        <ul>
+          <li><b>요금</b> — 무료 등급으로도 사용할 수 있지만 분당·일일 사용량 제한이 있습니다. 한도 초과(429) 오류가 잦으면 <a href="https://ai.google.dev/gemini-api/docs/rate-limits" target="_blank" rel="noopener noreferrer">사용량 한도</a>를 확인하거나 AI Studio에서 결제를 연결하세요. <a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noopener noreferrer">요금 안내</a></li>
+          <li><b>학생 자료</b> — 무료 등급은 입력이 Google 서비스 개선에 쓰일 수 있습니다. 실제 학생 생기부에는 <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer">결제(유료) 등급</a> 키를 권장합니다.</li>
+          <li><b>키 보관</b> — 키는 이 브라우저에만 저장되고, 요청할 때 이 PC의 로컬 서버를 거쳐 Google로만 전달됩니다. 공용 PC에서는 ‘이번 탭에서만 사용’을 고르세요.</li>
+          <li><b>키가 새면</b> — <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">AI Studio</a>에서 해당 키를 삭제하고 새로 만드세요.</li>
+        </ul>
+      </details>
     </form>
   </dialog>
 

@@ -6,10 +6,17 @@
 
 ```bash
 npm install
-copy .env.example .env   # GEMINI_API_KEY 입력
 npm start                # http://localhost:5178
 ```
 
+브라우저에서 오른쪽 위 **‘API 키 설정’** 버튼을 누르면 발급 안내와 연결 테스트가 나옵니다.
+
+1. [aistudio.google.com/apikey](https://aistudio.google.com/apikey)에서 Google 계정으로 로그인합니다.
+2. ‘API 키 만들기(Create API key)’를 누릅니다.
+3. 발급된 키(요즘 키는 `AQ.`로 시작하고, 이전 키는 `AIza`로 시작)를 붙여넣고 **테스트 후 저장**을 누릅니다.
+
+- 키는 브라우저에만 저장됩니다(‘이 브라우저에 기억’ 또는 ‘이번 탭에서만’ 중 선택). 요청할 때만 로컬 서버를 거쳐 Google로 전달됩니다.
+- 서버 관리자는 `.env`의 `GEMINI_API_KEY`로 공용 키를 넣어 둘 수도 있습니다(`.env.example` 참고). 브라우저에 입력한 키가 있으면 그 키가 우선합니다.
 - Node.js 20 이상이 필요합니다. 외부 의존성은 `@google/genai`, `pdfjs-dist` 두 개입니다.
 - `.env`의 `GEMINI_MODEL`을 바꾸면 다른 Gemini 모델을 쓸 수 있습니다.
 
