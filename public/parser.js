@@ -478,6 +478,9 @@ export async function parseSaenggibu(pdfjsLib, data) {
 
 // LLM에 보낼 압축 텍스트 (6개 영역만, 개인 식별 정보 없음)
 export function recordToText(r) {
+  // MD·JSON·엑셀 등 영역 구조가 없는 파일은 내용을 그대로 쓴다
+  const n = r.creative.length + r.grades.length + r.seteuk.length + r.behavior.length;
+  if (!n && r.rawText) return r.rawText;
   const out = [];
   out.push("## 창의적 체험활동상황");
   for (const c of r.creative) {
@@ -501,5 +504,6 @@ export function recordToText(r) {
   for (const s of r.seteuk) out.push(`[${s.grade}학년 ${s.subject}] ${s.text}`);
   out.push("\n## 행동특성 및 종합의견");
   for (const b of r.behavior) out.push(`[${b.grade}학년] ${b.text}`);
+  if (r.extraText) out.push("\n## 기타 자료", r.extraText);
   return out.join("\n");
 }

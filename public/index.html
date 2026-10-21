@@ -30,14 +30,15 @@
       <div class="hero">
         <p class="eyebrow">입학사정관 시점 · 학생부종합전형 면접 준비</p>
         <h1>생기부 한 장으로<br /><span class="grad">지원 학과 맞춤 면접</span>을 준비하세요</h1>
-        <p class="lead">PDF를 올리면 창체·교과 성적·세특·행특 6개 영역만 골라 읽고, 입학사정관이 실제로 물어볼 질문과 모범 답변, 꼬리질문까지 만들어 드립니다.</p>
+        <p class="lead">PDF(또는 엑셀·MD·JSON)를 올리면 창체·교과 성적·세특·행특 6개 영역만 골라 읽고, 입학사정관이 실제로 물어볼 질문과 모범 답변, 꼬리질문까지 만들어 드립니다.</p>
       </div>
 
       <label class="dropzone" id="dropzone" tabindex="0">
-        <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
+        <input type="file" id="fileInput" accept=".pdf,application/pdf,.xlsx,.xlsm,.xls,.csv,.md,.markdown,.txt,.json,application/json" hidden />
         <span class="dz-icon" data-icon="upload"></span>
-        <span class="dz-title">학교생활기록부 PDF를 끌어다 놓거나 클릭하세요</span>
-        <span class="dz-sub">NEIS에서 출력한 PDF · 파일은 이 브라우저 밖으로 나가지 않습니다</span>
+        <span class="dz-title">학교생활기록부 파일을 끌어다 놓거나 클릭하세요</span>
+        <span class="dz-sub">NEIS에서 출력한 PDF, 또는 이 앱에서 저장한 엑셀·MD·JSON · 파일은 이 브라우저 밖으로 나가지 않습니다</span>
+        <span class="dz-formats" aria-label="지원 형식"><span>PDF</span><span>XLSX · CSV</span><span>MD</span><span>JSON</span></span>
         <span class="dz-status" id="dzStatus" hidden></span>
       </label>
 
@@ -134,7 +135,8 @@
     <form method="dialog">
       <h3><span data-icon="shield"></span>학교생활기록부 처리 안내</h3>
       <ul>
-        <li><b>PDF 원본은 서버로 전송되지 않습니다.</b> 브라우저에서 직접 읽고, 메모리에서만 사용합니다.</li>
+        <li><b>파일 원본은 서버로 전송되지 않습니다.</b> PDF·엑셀·MD·JSON 모두 브라우저에서 직접 읽고, 메모리에서만 사용합니다.</li>
+        <li><b>엑셀·MD·JSON</b>은 이 앱 형식(저장 기능으로 만든 파일)이면 6개 영역으로 그대로 불러오고, 다른 형식이면 내용 전체를 전송 텍스트로 씁니다. 이때는 영역 필터링이 적용되지 않으니 전송 전에 확인하세요.</li>
         <li><b>6개 영역만 추출합니다.</b> 자율·동아리·진로활동, 교과 성적, 세부능력 및 특기사항, 행동특성 및 종합의견 외의 영역(인적·학적사항, 출결, 수상, 자격증, 학교폭력, 봉사, 독서)은 읽지 않습니다.</li>
         <li><b>머리말·꼬리말을 버립니다.</b> 각 페이지 하단의 성명·반·번호·학교명·출력 정보는 좌표 기준으로 제외합니다.</li>
         <li><b>2중 마스킹.</b> 주민번호·전화번호·이메일·주소·학교명 패턴은 브라우저와 서버에서 한 번 더 가립니다.</li>

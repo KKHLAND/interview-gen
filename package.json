@@ -9,7 +9,8 @@
     "start": "node server.mjs",
     "dev": "node --watch server.mjs",
     "build": "node scripts/copy-vendor.mjs",
-    "test:parse": "node test/parse-sample.mjs"
+    "test:parse": "node test/parse-sample.mjs",
+    "test:formats": "node test/formats-roundtrip.mjs"
   },
   "engines": {
     "node": ">=20"

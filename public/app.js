@@ -1,7 +1,40 @@
 import * as pdfjsLib from "/vendor/pdf.min.mjs";
 import { parseSaenggibu, recordToText } from "/parser.js";
+import { recordCount, recordToJSON, jsonToRecord, recordToMarkdown, markdownToRecord, recordToWorkbook, workbookToRecord } from "/formats.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.mjs";
+
+// 엑셀 처리(SheetJS)는 엑셀 파일을 다룰 때만 불러온다
+const XLSX_URLS = ["https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs", "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs"];
+let xlsxLib = null;
+async function loadXLSX() {
+  if (xlsxLib) return xlsxLib;
+  for (const u of XLSX_URLS) {
+    try { xlsxLib = await import(u); return xlsxLib; } catch (e) { console.warn("SheetJS load failed", u, e); }
+  }
+  throw new Error("엑셀 처리 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하세요.");
+}
+
+const FILE_KINDS = {
+  pdf: { re: /\.pdf$/i, label: "PDF" },
+  xlsx: { re: /\.(xlsx|xlsm|xls)$/i, label: "엑셀" },
+  csv: { re: /\.csv$/i, label: "CSV" },
+  md: { re: /\.(md|markdown|txt)$/i, label: "MD" },
+  json: { re: /\.json$/i, label: "JSON" },
+};
+function fileKind(file) {
+  for (const [k, v] of Object.entries(FILE_KINDS)) if (v.re.test(file.name)) return k;
+  if (file.type === "application/pdf") return "pdf";
+  if (file.type === "application/json") return "json";
+  if (/spreadsheet|excel/.test(file.type)) return "xlsx";
+  if (file.type === "text/markdown") return "md";
+  return null;
+}
+// UTF-8이 아니면(엑셀에서 저장한 CSV 등) EUC-KR로 다시 읽는다
+function decodeText(buf) {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf).replace(/^﻿/, ""); }
+  catch { return new TextDecoder("euc-kr").decode(buf); }
+}
 
 // ---------------- 상수 ----------------
 const COMPETENCIES = ["학업역량", "탐구역량", "진로·전공역량", "자기주도성", "창의·비판적 사고", "협력·공동체", "의사소통", "성찰·성장"];
@@ -21,6 +54,7 @@ const S = {
   uni: null, uniState: "idle", uniError: "",
   practice: null,
   tab: "data",
+  edit: { fmt: "md", draft: null }, // 파일로 저장·편집 카드 (draft: 사용자가 고친 내용, null이면 레코드에서 새로 생성)
 };
 
 // ---------------- 유틸 ----------------
@@ -261,18 +295,28 @@ function initUpload() {
 async function handleFile(file) {
   const st = $("#dzStatus");
   st.hidden = false; st.className = "dz-status";
-  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") { st.textContent = "PDF 파일만 올릴 수 있습니다."; st.classList.add("err"); return; }
-  st.textContent = "브라우저에서 6개 영역만 추출하는 중…";
+  const kind = fileKind(file);
+  if (!kind) { st.textContent = "PDF, 엑셀(xlsx·xls·csv), MD, JSON 파일만 올릴 수 있습니다."; st.classList.add("err"); return; }
+  if (file.size > 30 * 1024 * 1024) { st.textContent = "30MB 이하 파일만 올릴 수 있습니다."; st.classList.add("err"); return; }
+  st.textContent = kind === "pdf" ? "브라우저에서 6개 영역만 추출하는 중…" : `${FILE_KINDS[kind].label} 파일을 읽는 중…`;
   try {
     const buf = new Uint8Array(await file.arrayBuffer());
-    const record = await parseSaenggibu(pdfjsLib, buf);
-    const n = record.creative.length + record.grades.length + record.seteuk.length + record.behavior.length;
-    if (!n) throw new Error("생기부 형식을 인식하지 못했습니다. NEIS에서 출력한 학교생활기록부 PDF인지 확인하세요.");
-    S.record = record;
-    S.recordText = recordToText(record);
-    Object.assign(S, { review: null, reviewState: "idle", questions: [], qState: "idle", uni: null, uniState: "idle", practice: null });
-    // 파일명에는 학생 이름이 들어가는 경우가 많아 표시하지 않는다
-    $("#fileMeta").textContent = `${record.meta.pages}쪽 · 6개 영역 추출 완료`;
+    let record;
+    if (kind === "pdf") {
+      record = await parseSaenggibu(pdfjsLib, buf);
+      record.meta.source = "pdf";
+      if (!recordCount(record)) throw new Error("생기부 형식을 인식하지 못했습니다. NEIS에서 출력한 학교생활기록부 PDF인지 확인하세요.");
+    } else if (kind === "json") {
+      record = jsonToRecord(decodeText(buf), "json");
+    } else if (kind === "md") {
+      record = markdownToRecord(decodeText(buf), "md");
+    } else {
+      const XLSX = await loadXLSX();
+      const wb = kind === "csv" ? XLSX.read(decodeText(buf), { type: "string" }) : XLSX.read(buf, { type: "array" });
+      record = workbookToRecord(XLSX, wb, kind);
+    }
+    if (!recordCount(record) && !record.rawText?.trim()) throw new Error("파일에서 읽을 내용이 없습니다.");
+    loadRecord(record);
     $("#landing").hidden = true;
     $("#workspace").hidden = false;
     $("#fileInput").value = "";
@@ -282,9 +326,23 @@ async function handleFile(file) {
     window.scrollTo({ top: 0 });
   } catch (e) {
     console.error(e);
-    st.textContent = e.message || "PDF를 읽지 못했습니다.";
+    st.textContent = e.message || "파일을 읽지 못했습니다.";
     st.classList.add("err");
   }
+}
+
+const SOURCE_LABEL = { pdf: "PDF", json: "JSON", md: "MD", xlsx: "엑셀", csv: "CSV", text: "텍스트" };
+// 새 레코드를 상태에 반영 (업로드·편집 적용 공용)
+function loadRecord(record, { keepResults = false } = {}) {
+  S.record = record;
+  S.recordText = recordToText(record);
+  S.edit = { fmt: S.edit?.fmt || "md", draft: null };
+  if (!keepResults) Object.assign(S, { review: null, reviewState: "idle", questions: [], qState: "idle", uni: null, uniState: "idle", practice: null });
+  // 파일명에는 학생 이름이 들어가는 경우가 많아 표시하지 않는다
+  const src = SOURCE_LABEL[record.meta.source] || "파일";
+  $("#fileMeta").textContent = recordCount(record)
+    ? `${src}${record.meta.pages ? ` ${record.meta.pages}쪽` : ""} · 6개 영역 ${record.meta.source === "pdf" ? "추출" : "불러오기"} 완료`
+    : `${src} · 자유 텍스트로 불러옴`;
 }
 
 function guessMajor(record) {
@@ -433,16 +491,20 @@ function renderData() {
   const behHtml = r.behavior.map((b) => `<div class="entry"><div class="entry-h"><span class="badge accent">${b.grade}학년</span>행동특성 및 종합의견</div><p>${esc(b.text)}</p></div>`).join("");
   const acc = (title, n, body, open = false) => `<details class="acc" ${open ? "open" : ""}><summary>${title}<span class="badge">${n}</span><span class="chev">${icon("chev")}</span></summary><div class="acc-body">${body}</div></details>`;
 
+  const structured = recordCount(r) > 0;
+  const fromPdf = r.meta.source === "pdf";
   p.innerHTML = `
-    ${r.meta.warnings.length ? `<div class="warnbox">${r.meta.warnings.map(esc).join("<br>")} 일부 영역은 아래 전송 텍스트에서 직접 보완할 수 있습니다.</div>` : ""}
+    ${r.meta.warnings.length ? `<div class="warnbox">${r.meta.warnings.map(esc).join("<br>")}${structured ? " 일부 영역은 아래 전송 텍스트에서 직접 보완할 수 있습니다." : ""}</div>` : ""}
+    ${structured ? `
     <div class="stat-row">${stats.map(([k, v, u]) => `<div class="stat"><small>${k}</small><b>${v}<em>${u}</em></b></div>`).join("")}</div>
     <div class="card sec">
-      <div class="sec-head"><h3>추출된 6개 영역</h3><span class="sub">성명·학교·반·번호 등 개인정보는 읽지 않았습니다${r.meta.masked ? ` · 개인정보 의심 패턴 ${r.meta.masked}건 마스킹` : ""}</span></div>
+      <div class="sec-head"><h3>${fromPdf ? "추출된" : "불러온"} 6개 영역</h3><span class="sub">${fromPdf ? "성명·학교·반·번호 등 개인정보는 읽지 않았습니다" : `${esc(SOURCE_LABEL[r.meta.source] || "")} 파일에서 불러왔습니다`}${r.meta.masked ? ` · 개인정보 의심 패턴 ${r.meta.masked}건 마스킹` : ""}</span></div>
       ${acc("창의적 체험활동 — 자율 · 동아리 · 진로", r.creative.filter((c) => c.text).length, creativeHtml, true)}
       ${acc("교과 성적", r.grades.length, `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>학년-학기</th><th>구분</th><th>교과</th><th>과목</th><th>학점</th><th>원점수/평균(표준편차)</th><th>성취도(수강자)</th><th>등급/분포</th></tr></thead><tbody>${gradeRows}</tbody></table></div>`)}
       ${acc("세부능력 및 특기사항", r.seteuk.length, seteukHtml)}
       ${acc("행동특성 및 종합의견", r.behavior.length, behHtml)}
     </div>
+    ${editCardHtml()}` : ""}
     <div class="card sec send-box">
       <div class="sec-head"><h3>AI로 전송될 텍스트</h3><span class="sub" id="sendLen">${S.recordText.length.toLocaleString()}자</span>
         <div class="right"><button class="btn-ghost sm" id="restoreText" type="button">${icon("refresh")}원래대로</button></div></div>
@@ -451,6 +513,96 @@ function renderData() {
     </div>`;
   $("#sendText").oninput = (e) => { S.recordText = e.target.value; $("#sendLen").textContent = `${S.recordText.length.toLocaleString()}자`; };
   $("#restoreText").onclick = () => { S.recordText = recordToText(S.record); $("#sendText").value = S.recordText; $("#sendLen").textContent = `${S.recordText.length.toLocaleString()}자`; toast("추출 원본으로 되돌렸습니다."); };
+  if (structured) bindEditCard();
+}
+
+// ---------------- 파일로 저장 · 편집 (MD / JSON / 엑셀) ----------------
+const EDIT_FMT = {
+  md: { label: "Markdown", ext: "md", mime: "text/markdown", make: recordToMarkdown, parse: (t) => markdownToRecord(t, "md") },
+  json: { label: "JSON", ext: "json", mime: "application/json", make: recordToJSON, parse: (t) => jsonToRecord(t, "json") },
+};
+function editDraft() {
+  return S.edit.draft ?? EDIT_FMT[S.edit.fmt].make(S.record);
+}
+function editCardHtml() {
+  const f = S.edit.fmt;
+  return `<div class="card sec edit-card">
+    <div class="sec-head"><h3>파일로 저장 · 편집</h3><span class="sub">${S.record.meta.source === "pdf" ? "PDF에서 추출한 6개 영역" : "불러온 데이터"}를 MD·JSON으로 고치고 저장합니다. 저장한 파일은 다음에 그대로 다시 올릴 수 있습니다.</span></div>
+    <div class="edit-bar">
+      <div class="seg fmt-seg" id="editFmt">${Object.entries(EDIT_FMT).map(([k, v]) => `<button type="button" data-v="${k}" class="${k === f ? "on" : ""}">${v.label}</button>`).join("")}</div>
+      <span class="edit-state" id="editState">${S.edit.draft != null ? "수정됨 · 아직 적용 안 함" : ""}</span>
+      <span class="grow"></span>
+      <button class="btn-ghost sm" id="editReset" type="button">${icon("refresh")}되돌리기</button>
+      <button class="btn-primary sm" id="editApply" type="button">${icon("check")}편집 내용 적용</button>
+    </div>
+    <textarea class="input mono" id="editText" spellcheck="false" aria-label="${EDIT_FMT[f].label} 편집">${esc(editDraft())}</textarea>
+    <div class="edit-bar">
+      <button class="btn-ghost sm" id="editDl" type="button">${icon("download")}.${EDIT_FMT[f].ext}로 저장</button>
+      <button class="btn-ghost sm" id="editDlOther" type="button">${icon("download")}.${f === "md" ? "json" : "md"}로 저장</button>
+      <button class="btn-ghost sm" id="editXlsx" type="button">${icon("download")}엑셀(.xlsx)로 저장</button>
+      <button class="btn-ghost sm" id="editCopy" type="button">${icon("copy")}복사</button>
+    </div>
+  </div>`;
+}
+
+function saveFile(content, ext, mime) {
+  const blob = content instanceof Blob ? content : new Blob([content], { type: `${mime};charset=utf-8` });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `생기부_추출데이터_${new Date().toISOString().slice(0, 10)}.${ext}`; // 파일명에 학생 이름을 넣지 않는다
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// 편집 중인 내용을 레코드로 해석 (실패하면 오류)
+function parseDraft() {
+  const r = EDIT_FMT[S.edit.fmt].parse($("#editText").value);
+  if (!recordCount(r)) throw new Error(`${EDIT_FMT[S.edit.fmt].label} 내용에서 6개 영역을 찾지 못했습니다. 영역 제목(##, ###)이나 키 이름을 확인하세요.`);
+  r.meta.source = S.record.meta.source;
+  r.meta.pages = S.record.meta.pages;
+  return r;
+}
+
+function bindEditCard() {
+  const ta = $("#editText");
+  ta.oninput = () => { S.edit.draft = ta.value; $("#editState").textContent = "수정됨 · 아직 적용 안 함"; };
+  $("#editFmt").onclick = (e) => {
+    const b = e.target.closest("button"); if (!b || b.dataset.v === S.edit.fmt) return;
+    if (S.edit.draft != null) {
+      // 고친 내용을 버리지 않도록 현재 형식으로 해석한 뒤 새 형식으로 바꿔 보여준다
+      try { const r = parseDraft(); S.edit = { fmt: b.dataset.v, draft: EDIT_FMT[b.dataset.v].make(r) }; }
+      catch (err) { return toast(err.message, true); }
+    } else S.edit = { fmt: b.dataset.v, draft: null };
+    renderData();
+  };
+  $("#editReset").onclick = () => {
+    if (S.edit.draft == null) return;
+    if (!confirm("적용하지 않은 편집 내용을 버릴까요?")) return;
+    S.edit.draft = null; renderData();
+  };
+  $("#editApply").onclick = () => {
+    try {
+      const r = parseDraft();
+      const fmt = S.edit.fmt;
+      const hasResults = S.questions.length || S.review;
+      loadRecord(r, { keepResults: true });
+      S.edit = { fmt, draft: null };
+      renderData();
+      toast(hasResults ? "편집 내용을 적용했습니다. 새 내용으로 분석하려면 ‘다시 분석 · 생성’을 누르세요." : "편집 내용을 적용했습니다. AI 전송 텍스트도 새로 만들었습니다.");
+    } catch (err) { toast(err.message, true); }
+  };
+  const current = () => { try { return S.edit.draft != null ? parseDraft() : S.record; } catch (err) { toast(err.message, true); return null; } };
+  $("#editDl").onclick = () => { const f = EDIT_FMT[S.edit.fmt]; if (S.edit.fmt === "json" && S.edit.draft != null && !current()) return; saveFile(ta.value, f.ext, f.mime); };
+  $("#editDlOther").onclick = () => { const r = current(); if (!r) return; const f = EDIT_FMT[S.edit.fmt === "md" ? "json" : "md"]; saveFile(f.make(r), f.ext, f.mime); };
+  $("#editXlsx").onclick = async () => {
+    const r = current(); if (!r) return;
+    try {
+      const XLSX = await loadXLSX();
+      const out = XLSX.write(recordToWorkbook(XLSX, r), { bookType: "xlsx", type: "array" });
+      saveFile(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "xlsx");
+    } catch (err) { toast(err.message, true); }
+  };
+  $("#editCopy").onclick = async () => { try { await navigator.clipboard.writeText(ta.value); toast("클립보드에 복사했습니다."); } catch { toast("복사에 실패했습니다.", true); } };
 }
 
 function weightedRank(rows) {
