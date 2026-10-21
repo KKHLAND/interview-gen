@@ -1,0 +1,21 @@
+﻿{
+  "name": "saenggibu-interview",
+  "version": "1.0.0",
+  "description": "생기부 PDF 기반 대입 맞춤 면접 질문·답변 생성기 (Gemini)",
+  "type": "module",
+  "main": "server.mjs",
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "test:parse": "node test/parse-sample.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@google/genai": "^2.30.0",
+    "pdfjs-dist": "^6.4.299"
+  }
+}
