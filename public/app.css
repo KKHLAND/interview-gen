@@ -203,6 +203,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl td.num { font-variant-numeric: tabular-nums; }
 .rank { display: inline-grid; place-items: center; min-width: 24px; height: 22px; border-radius: 6px; font-weight: 700; font-size: 12px; }
 .send-box { margin-top: 4px; }
+.export-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 14px; }
+.export-bar b { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.export-bar b svg.i { width: 16px; height: 16px; color: var(--accent); }
+.export-bar .grow { flex: 1; }
+.export-bar .sub { color: var(--text-3); font-size: 12.5px; }
+.export-bar.inline { padding: 10px 0 14px; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
 .edit-card textarea.input.mono { height: 320px; margin: 10px 0; }
 .edit-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .edit-bar .grow { flex: 1; }
@@ -439,4 +445,9 @@ ul.dots.num li::before { counter-increment: n; content: counter(n); width: 18px;
   .print-root .pq p { margin: 4pt 0; }
   .print-root .pq .lbl { font-weight: 700; color: #333; }
   .print-root ol { margin: 2pt 0; padding-left: 16pt; }
+  .print-root h3.sec { font-size: 13pt; color: #2f2f8f; margin: 16pt 0 6pt; padding-bottom: 3pt; border-bottom: 1.5px solid #2f2f8f; break-after: avoid; }
+  .print-root > p { margin: 4pt 0; }
+  .print-root p.li { margin: 2pt 0 2pt 12pt; text-indent: -10pt; padding-left: 0; }
+  .print-root p.li .bul { display: inline-block; min-width: 10pt; color: #444; }
+  .print-root .lbl { font-weight: 700; color: #333; }
 }

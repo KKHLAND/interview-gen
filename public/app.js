@@ -1,5 +1,6 @@
 import * as pdfjsLib from "/vendor/pdf.min.mjs";
 import { parseSaenggibu, recordToText } from "/parser.js";
+import { toPrintHtml, toText, toDocx, toHwpx } from "/exporters.js";
 import { recordCount, recordToJSON, jsonToRecord, recordToMarkdown, markdownToRecord, recordToWorkbook, workbookToRecord } from "/formats.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.mjs";
@@ -635,6 +636,7 @@ function renderReview() {
   const areas = areaOrder.map((a) => v.areas?.find((x) => x.area === a)).filter(Boolean);
   const stars = (n) => "★".repeat(n) + `<i>${"★".repeat(5 - n)}</i>`;
   p.innerHTML = `
+    <div class="card export-bar"><b>${icon("download")}생기부 리뷰 내보내기</b><span class="grow"></span>${exportBtns("review", true)}</div>
     <div class="card sec review-hero">
       <div><span class="type-tag">${esc(v.studentType)}</span><h2>${esc(target().major || "지원 학과")} 관점 총평</h2><p>${esc(v.summary)}</p>
         <div class="kw">${(v.keywords || []).map((k) => `<span>#${esc(k)}</span>`).join("")}</div></div>
@@ -758,8 +760,7 @@ function renderQuestions() {
         <select id="qArea" aria-label="영역 필터"><option value="all">모든 영역</option>${areas.map((a) => `<option value="${esc(a)}" ${S.filter.area === a ? "selected" : ""}>${esc(AREA_LABEL[a] || a)}</option>`).join("")}</select>
         <button class="btn-ghost ${S.filter.kept ? "on" : ""}" id="qKept" type="button">${icon("star")}보관 ${keptN}</button>
         <button class="btn-ghost" id="qOpen" type="button">${S.openAll ? "모두 접기" : "모두 펼치기"}</button>
-        <button class="btn-ghost" id="qPrint" type="button">${icon("print")}PDF</button>
-        <button class="btn-ghost" id="qTxt" type="button">${icon("download")}TXT</button>
+        ${exportBtns("questions")}
         <button class="btn-ghost" id="qCopy" type="button">${icon("copy")}복사</button>
       </div>
     </div>
@@ -770,9 +771,7 @@ function renderQuestions() {
   $("#qArea").onchange = (e) => { S.filter.area = e.target.value; renderQuestions(); };
   $("#qKept").onclick = () => { S.filter.kept = !S.filter.kept; renderQuestions(); };
   $("#qOpen").onclick = () => { S.openAll = !S.openAll; renderQuestions(); };
-  $("#qPrint").onclick = printReport;
-  $("#qTxt").onclick = () => downloadTxt();
-  $("#qCopy").onclick = async () => { try { await navigator.clipboard.writeText(exportText()); toast("클립보드에 복사했습니다."); } catch { toast("복사에 실패했습니다.", true); } };
+  $("#qCopy").onclick = async () => { try { await navigator.clipboard.writeText(toText(questionsDoc().blocks)); toast("클립보드에 복사했습니다."); } catch { toast("복사에 실패했습니다.", true); } };
   $("#qList").onclick = onCardAction;
 }
 
@@ -822,37 +821,132 @@ async function rewriteQuestion(q, card, instruction) {
 
 // 내보내기
 function exportSet() { const k = S.questions.filter((q) => q.kept); return k.length ? k : S.questions; }
-function exportText() {
-  const t = target();
-  const lines = [`[생기부 맞춤 면접 질문] ${[t.university, t.major].filter(Boolean).join(" ") || ""}`, ""];
-  exportSet().forEach((q, i) => {
-    lines.push(`Q${i + 1}. ${q.question}`, `  - 평가요소: ${q.category} / 근거: ${q.source}${q.evidence ? ` "${q.evidence}"` : ""}`, `  - 출제 의도: ${q.intent}`);
-    if (q.answerGuide?.length) lines.push(`  - 답변 포인트: ${q.answerGuide.join(" / ")}`);
-    lines.push(`  - 모범 답변: ${q.sampleAnswer}`);
-    q.followUps?.forEach((f, j) => lines.push(`  - 꼬리질문 ${j + 1}: ${f}`));
-    lines.push("");
-  });
-  return lines.join("\n");
+// ---------------- 결과물 내보내기 (PDF 인쇄 · 한글 · Word · TXT) ----------------
+const EXPORT_FMTS = [["pdf", "print", "PDF·인쇄"], ["hwpx", "download", "한글"], ["docx", "download", "Word"], ["txt", "download", "TXT"]];
+function exportBtns(kind, sm = false) {
+  return EXPORT_FMTS.map(([f, ic, l]) => `<button class="btn-ghost${sm ? " sm" : ""}" type="button" data-export="${kind}:${f}" title="${l}로 내보내기">${icon(ic)}${l}</button>`).join("");
 }
-function downloadTxt() {
-  const blob = new Blob(["﻿" + exportText()], { type: "text/plain;charset=utf-8" });
+const today = () => new Date().toLocaleDateString("ko-KR");
+const targetLine = (extra = []) => [target().university, target().major, ...extra].filter(Boolean).join(" · ");
+
+function questionsDoc() {
+  const set = exportSet();
+  if (!set.length) return null;
+  const kept = S.questions.some((q) => q.kept);
+  return {
+    title: "생기부 맞춤 면접 질문", file: "면접질문",
+    blocks: [
+      { t: "title", text: "생기부 맞춤 면접 질문" },
+      { t: "meta", text: `${targetLine([target().mode])} · ${set.length}문항${kept ? "(보관 문항)" : ""} · ${today()}` },
+      ...set.map((q, i) => ({ t: "item", blocks: [
+        { t: "tag", text: `${q.category} · ${AREA_LABEL[q.area] || q.area || ""} · 난이도 ${q.difficulty}/5` },
+        { t: "h2", text: `Q${i + 1}. ${q.question}` },
+        { t: "p", label: "근거", text: `${q.source}${q.evidence ? ` "${q.evidence}"` : ""}` },
+        { t: "p", label: "출제 의도", text: q.intent },
+        ...(q.answerGuide?.length ? [{ t: "p", label: "답변 포인트", text: "" }, ...q.answerGuide.map((a, j) => ({ t: "li", n: j + 1, text: a }))] : []),
+        { t: "p", label: "모범 답변", text: q.sampleAnswer },
+        ...(q.followUps?.length ? [{ t: "p", label: "꼬리질문", text: "" }, ...q.followUps.map((f, j) => ({ t: "li", n: j + 1, text: f }))] : []),
+      ] })),
+    ],
+  };
+}
+
+function reviewDoc() {
+  const v = S.review;
+  if (!v) return null;
+  const list = (arr, n) => (arr || []).map((x, i) => ({ t: "li", text: x, ...(n ? { n: i + 1 } : {}) }));
+  const comps = COMPETENCIES.map((n) => v.competencies?.find((c) => c.name === n)).filter(Boolean);
+  const areaOrder = ["자율활동", "동아리활동", "진로활동", "교과성적", "세부능력및특기사항", "행동특성및종합의견"];
+  const areas = areaOrder.map((a) => v.areas?.find((x) => x.area === a)).filter(Boolean);
+  const r = S.record;
+  const keys = r ? [...new Set(r.grades.filter((g) => g.rank).map((g) => `${g.grade}-${g.semester}`))] : [];
+  const trend = keys.map((k) => `${k.replace("-", "학년 ")}학기 ${weightedRank(r.grades.filter((g) => `${g.grade}-${g.semester}` === k)).toFixed(2)}등급`);
+  return {
+    title: "생기부 리뷰", file: "생기부리뷰",
+    blocks: [
+      { t: "title", text: `생기부 리뷰 — ${target().major || "지원 학과"} 관점` },
+      { t: "meta", text: `${targetLine()}${targetLine() ? " · " : ""}${today()}` },
+      { t: "h1", text: "총평" },
+      { t: "p", label: "학생 유형", text: v.studentType },
+      { t: "p", text: v.summary },
+      ...(v.keywords?.length ? [{ t: "p", label: "키워드", text: v.keywords.map((k) => "#" + k).join(" ") }] : []),
+      { t: "h1", text: `전공 적합도 ${Math.max(0, Math.min(100, v.majorFit?.score ?? 0))}점` },
+      { t: "p", text: v.majorFit?.comment },
+      { t: "h1", text: "8대 평가요소" },
+      ...comps.map((c) => ({ t: "li", text: `${c.name} ${c.score}점 — ${c.comment || ""}` })),
+      { t: "h1", text: "영역별 평가" },
+      ...areas.map((a) => ({ t: "item", blocks: [
+        { t: "h2", text: `${AREA_LABEL[a.area] || a.area} (${"★".repeat(Math.max(0, Math.min(5, a.rating)))}${"☆".repeat(5 - Math.max(0, Math.min(5, a.rating)))})` },
+        { t: "p", text: a.summary },
+        ...(a.highlights?.length ? [{ t: "p", label: "돋보이는 점", text: "" }, ...list(a.highlights)] : []),
+        ...(a.concerns?.length ? [{ t: "p", label: "아쉬운 점", text: "" }, ...list(a.concerns)] : []),
+      ] })),
+      { t: "h1", text: "면접에서 살릴 강점" }, ...list(v.strengths),
+      { t: "h1", text: "압박 질문이 올 약점" }, ...list(v.risks),
+      ...(trend.length || v.gradeTrend ? [{ t: "h1", text: "학기별 평균 등급 추이" }, ...(trend.length ? [{ t: "p", text: trend.join(" → ") }] : []), ...(v.gradeTrend ? [{ t: "p", text: v.gradeTrend }] : [])] : []),
+      { t: "h1", text: "면접 대비 전략" }, ...list(v.strategy, true),
+    ],
+  };
+}
+
+function practiceDoc() {
+  const P = S.practice;
+  if (!P?.list?.length) return null;
+  const done = P.list.filter((x) => x.fb);
+  const avg = done.length ? Math.round(done.reduce((s, x) => s + x.fb.score, 0) / done.length) : null;
+  return {
+    title: "모의 면접 결과", file: "모의면접결과",
+    blocks: [
+      { t: "title", text: "모의 면접 결과" },
+      { t: "meta", text: `${targetLine()}${targetLine() ? " · " : ""}${done.length}/${P.list.length}문항 평가${avg != null ? ` · 평균 ${avg}점` : ""} · 답변 시간 ${P.sec}초 · ${today()}` },
+      ...P.list.map((x, i) => ({ t: "item", blocks: [
+        { t: "tag", text: `${x.q.category}${x.fb ? ` · ${x.fb.score}점 (${x.fb.grade})` : " · 평가 안 함"}` },
+        { t: "h2", text: `Q${i + 1}. ${x.q.question}` },
+        { t: "p", label: "내 답변", text: x.answer.trim() || "(답변 없음)" },
+        ...(x.fb ? [
+          { t: "p", label: "한 줄 평", text: x.fb.oneLine },
+          ...(x.fb.evidenceUse ? [{ t: "p", label: "생기부 근거 활용", text: x.fb.evidenceUse }] : []),
+          ...(x.fb.strengths?.length ? [{ t: "p", label: "잘한 점", text: "" }, ...x.fb.strengths.map((s) => ({ t: "li", text: s }))] : []),
+          ...(x.fb.improvements?.length ? [{ t: "p", label: "보완할 점", text: "" }, ...x.fb.improvements.map((s) => ({ t: "li", text: s }))] : []),
+          { t: "p", label: "다듬은 답변", text: x.fb.revisedAnswer },
+          ...(x.fb.followUp ? [{ t: "p", label: "면접관의 다음 질문", text: x.fb.followUp }] : []),
+        ] : []),
+      ] })),
+    ],
+  };
+}
+
+const DOCS = { questions: questionsDoc, review: reviewDoc, practice: practiceDoc };
+function exportName(doc, ext) {
+  const tag = (target().major || "").replace(/[\\/:*?"<>|]/g, "").trim();
+  return `${doc.file}${tag ? "_" + tag : ""}_${new Date().toISOString().slice(0, 10)}.${ext}`;
+}
+function saveBlob(blob, name) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `면접질문_${(target().major || "생기부").replace(/[\\/:*?"<>|]/g, "")}.txt`;
+  a.download = name;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1500);
 }
-function printReport() {
-  const t = target();
-  const set = exportSet();
-  $("#printRoot").innerHTML = `<h1>생기부 맞춤 면접 질문</h1>
-    <div class="meta">${esc([t.university, t.major, t.mode].filter(Boolean).join(" · "))} · ${set.length}문항 · ${new Date().toLocaleDateString("ko-KR")}</div>
-    ${set.map((q, i) => `<div class="pq"><div class="tag">${esc(q.category)} · ${esc(q.source)} · 난이도 ${q.difficulty}/5</div><h2>Q${i + 1}. ${esc(q.question)}</h2>
-      <p><span class="lbl">출제 의도</span> ${esc(q.intent)}</p>
-      ${q.answerGuide?.length ? `<p><span class="lbl">답변 포인트</span> ${q.answerGuide.map(esc).join(" / ")}</p>` : ""}
-      <p><span class="lbl">모범 답변</span> ${esc(q.sampleAnswer)}</p>
-      ${q.followUps?.length ? `<p class="lbl">꼬리질문</p><ol>${q.followUps.map((f) => `<li>${esc(f)}</li>`).join("")}</ol>` : ""}</div>`).join("")}`;
-  window.print();
+async function runExport(kind, fmt, btn) {
+  const doc = DOCS[kind]?.();
+  if (!doc) return toast("내보낼 결과가 없습니다.", true);
+  if (fmt === "pdf") {
+    $("#printRoot").innerHTML = toPrintHtml(doc.blocks);
+    return window.print();
+  }
+  if (btn) btn.disabled = true;
+  try {
+    if (fmt === "txt") saveBlob(new Blob(["\uFEFF" + toText(doc.blocks)], { type: "text/plain;charset=utf-8" }), exportName(doc, "txt"));
+    if (fmt === "docx") saveBlob(await toDocx(doc.blocks, doc.title), exportName(doc, "docx"));
+    if (fmt === "hwpx") saveBlob(await toHwpx(doc.blocks, doc.title), exportName(doc, "hwpx"));
+    toast(`${{ txt: "TXT", docx: "Word", hwpx: "한글" }[fmt]} 파일을 저장했습니다.`);
+  } catch (e) {
+    console.error(e);
+    toast("파일을 만들지 못했습니다: " + e.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ---------------- 패널: 실전 연습 ----------------
@@ -1007,6 +1101,7 @@ function renderPracticeSummary() {
   const avg = done.length ? Math.round(done.reduce((s, x) => s + x.fb.score, 0) / done.length) : 0;
   $("#panel-practice").innerHTML = `<div class="card sec">
     <div class="sec-head"><h3>모의 면접 결과</h3><span class="sub">${done.length} / ${P.list.length}문항 평가</span><div class="right"><button class="btn-primary" id="prAgain" type="button" style="height:38px">${icon("refresh")}새 세트로 다시</button></div></div>
+    <div class="export-bar inline"><b>${icon("download")}결과 내보내기</b><span class="sub">질문 · 내 답변 · AI 채점 · 다듬은 답변</span><span class="grow"></span>${exportBtns("practice", true)}</div>
     ${done.length ? `<div class="fb-head" style="margin-bottom:14px"><div class="fb-score">${avg}</div><div><b>평균 점수</b><p>낮은 점수 문항의 ‘다듬은 답변’을 다시 읽고 반복 연습하세요.</p></div></div>` : ""}
     <div class="summary-list">${P.list.map((x, i) => `<div><span class="badge">${i + 1}</span><span>${esc(x.q.question)}</span><b>${x.fb ? `${x.fb.score}점` : "건너뜀"}</b></div>`).join("")}</div>
   </div>`;
@@ -1062,6 +1157,7 @@ async function init() {
   ["#univ", "#major"].forEach((s) => $(s).addEventListener("change", () => S.tab === "univ" && renderUniv()));
   window.addEventListener("beforeunload", (e) => { if (S.questions.length) { e.preventDefault(); e.returnValue = ""; } });
   initKeyDialog();
+  document.addEventListener("click", (e) => { const b = e.target.closest("[data-export]"); if (b) { const [k, f] = b.dataset.export.split(":"); runExport(k, f, b); } });
   try {
     const h = await fetch("/api/health").then((r) => r.json());
     serverHasKey = !!h.keyConfigured;
