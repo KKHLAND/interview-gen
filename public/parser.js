@@ -1,4 +1,4 @@
-// 학교생활기록부 PDF 파서 (브라우저/Node 공용 ESM)
+// 학교생활기록부·개인별 대입전형자료 PDF 파서 (브라우저/Node 공용 ESM)
 // 개인정보 보호 원칙: 아래 6개 영역만 읽는다. 그 외 영역(인적·학적, 출결, 수상, 자격증,
 // 학교폭력, 봉사, 독서)과 페이지 머리말/꼬리말(성명·반·번호·학교명·출력정보)은 아예 수집하지 않는다.
 //   1) 자율활동 2) 동아리활동 3) 진로활동 4) 교과 성적 5) 세부능력 및 특기사항 6) 행동특성 및 종합의견
@@ -6,16 +6,20 @@
 const FOOTER_ZONE = 60; // 페이지 하단 60pt(성명·반·번호·출력정보 꼬리말)는 무조건 버림
 const HEADER_ZONE = 40; // 페이지 상단 머리말 여유
 
+// 섹션 제목은 공백을 모두 지운 문자열로 비교한다.
+// 학교생활기록부는 "6. 창의적 체험활동상황"처럼 번호가 붙고, 개인별 대입전형자료는 번호 없이 "창의적 체험활동상황"으로 나온다.
 const RE = {
-  sec6: /^6\.\s*창의적\s*체험활동상황/,
+  sec6: /^(?:6\.)?창의적체험활동상황/,
   volunteer: /^봉\s*사\s*활\s*동\s*실\s*적/,
-  sec7: /^7\.\s*교과학습발달상황/,
-  sec8: /^8\.\s*독서활동상황/,
-  sec9: /^9\.\s*행동특성\s*및\s*종합의견/,
+  sec7: /^(?:7\.)?교과학습발달상황/,
+  sec9: /^(?:9\.)?행동특성및종합의견/,
   anySection: /^\d{1,2}\.\s*\S/,
+  // 번호 없는 그 외 섹션(대입전형자료) → 수집 중단
+  otherSection: /^(?:인적[·ㆍ・]?학적사항|학적사항|출결상황|수상경력|자격증및인증취득상황|국가직무능력표준|학교폭력|독서활동상황|봉사활동실적|정정대장)/,
+  printDate: /^\d{4}\.\d{1,2}\.\d{1,2}\.?$/,
   gradeHeader: /^\[(\d)학년\]/,
   subTable: /^<\s*(진로\s*선택\s*과목|체육\s*[ㆍ·・]?\s*예술|교양\s*과목|.+?)\s*>$/,
-  seteukHeader: /세부능력\s*및\s*특기사항/,
+  seteukHeader: /세부능력및특기사항/, // 대입전형자료는 "세 부 능 력 및 특 기 사 항"처럼 글자 사이가 띄어져 있어 공백 제거 후 비교
   none: /^(해당\s*사항\s*없음|해당\s*학년의\s*자료가\s*없습니다)$/,
   score: /^(\d{1,3}(?:\.\d+)?)\/(\d{1,3}(?:\.\d+)?)(?:\((\d{1,3}(?:\.\d+)?)\))?$/,
   achieve: /^([A-EP])(?:\((\d+)\))?$/,
@@ -61,6 +65,7 @@ async function loadPages(pdfjsLib, data) {
       const x = it.transform[4];
       const y = vp.height - it.transform[5];
       if (y > vp.height - FOOTER_ZONE || y < HEADER_ZONE) continue; // 머리말·꼬리말 폐기
+      if (y < HEADER_ZONE + 25 && RE.printDate.test(str)) continue; // 대입전형자료 상단 출력일자
       items.push({ str, x, y, w: it.width, page: p });
     }
     pages.push({ no: p, height: vp.height, width: vp.width, lines: toLines(items) });
@@ -266,9 +271,11 @@ function parseTable(lineGroups, kind, grade) {
         } else if ((m = it.str.match(RE.achieve)) && !row.achievement) {
           row.achievement = m[1];
           if (m[2]) row.students = Number(m[2]);
+        } else if ((m = it.str.match(/^\((\d+)\)$/)) && row.students == null) {
+          row.students = Number(m[1]); // 대입전형자료: 성취도 없이 (수강자수)만 표기
         } else if (RE.dist.test(it.str)) {
           row.distribution = it.str;
-        } else if (/^[1-9]$/.test(it.str) && row.achievement && row.rank == null) {
+        } else if (/^[1-9]$/.test(it.str) && (row.achievement || row.students != null) && row.rank == null) {
           row.rank = Number(it.str);
         }
       }
@@ -373,7 +380,7 @@ function parseAcademic(chunks) {
         continue;
       }
       if (mode === "table" && /^\(?[가-힣]*\)?$/.test(t) && lines[i + 1] && lines[i + 1].y - l.y <= 10 && lines[i + 1].items.some((x) => x.str === "교과")) continue;
-      if (RE.seteukHeader.test(t) && /과\s*목/.test(t)) {
+      if (RE.seteukHeader.test(t.replace(/\s/g, "")) && /과\s*목/.test(t)) {
         if (mode === "seteuk") continue; // 페이지가 넘어가며 반복되는 머리줄
         flush();
         mode = "seteuk";
@@ -403,7 +410,7 @@ function parseAcademic(chunks) {
 function parseBehavior(chunks) {
   const out = [];
   for (const ch of chunks) {
-    const header = ch.lines.find((l) => /행동특성\s*및\s*종합의견/.test(l.text) && /학년/.test(l.text));
+    const header = ch.lines.find((l) => /행동특성및종합의견/.test(l.text.replace(/\s/g, "")) && /학년/.test(l.text));
     const body = ch.lines.filter((l) => !header || l.y > header.y + 2);
     if (!body.length) continue;
     const contentX = Math.min(...body.flatMap((l) => l.items.filter((i) => i.str.length > 3).map((i) => i.x)));
@@ -437,11 +444,13 @@ function splitSections(pages) {
     const buckets = {};
     for (const l of pg.lines) {
       const t = l.text.trim();
+      const flat = t.replace(/\s/g, "");
       const leftAligned = l.x < 80;
-      if (leftAligned && RE.sec6.test(t)) { cur = "creative"; continue; }
-      if (RE.volunteer.test(t.replace(/\s/g, " ")) || /^봉사활동실적$/.test(t.replace(/\s/g, ""))) { cur = null; continue; }
-      if (leftAligned && RE.sec7.test(t)) { cur = "academic"; continue; }
-      if (leftAligned && RE.sec9.test(t)) { cur = "behavior"; continue; }
+      if (leftAligned && RE.sec6.test(flat)) { cur = "creative"; continue; }
+      if (RE.volunteer.test(t.replace(/\s/g, " ")) || /^봉사활동실적$/.test(flat)) { cur = null; continue; }
+      if (leftAligned && RE.sec7.test(flat)) { cur = "academic"; continue; }
+      if (leftAligned && RE.sec9.test(flat)) { cur = "behavior"; continue; }
+      if (leftAligned && RE.otherSection.test(flat)) { cur = null; continue; }
       if (leftAligned && RE.anySection.test(t) && !/^\d+\.\d/.test(t)) {
         // 그 외 번호 섹션(8. 독서 등) 진입 → 수집 중단
         if (!/^[679]\./.test(t)) { cur = null; continue; }

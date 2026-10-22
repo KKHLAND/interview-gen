@@ -37,7 +37,7 @@
         <input type="file" id="fileInput" accept=".pdf,application/pdf,.xlsx,.xlsm,.xls,.csv,.md,.markdown,.txt,.json,application/json" hidden />
         <span class="dz-icon" data-icon="upload"></span>
         <span class="dz-title">학교생활기록부 파일을 끌어다 놓거나 클릭하세요</span>
-        <span class="dz-sub">NEIS에서 출력한 PDF, 또는 이 앱에서 저장한 엑셀·MD·JSON · 파일은 이 브라우저 밖으로 나가지 않습니다</span>
+        <span class="dz-sub">NEIS에서 출력한 학교생활기록부·개인별 대입전형자료 PDF, 또는 이 앱에서 저장한 엑셀·MD·JSON · 파일은 이 브라우저 밖으로 나가지 않습니다</span>
         <span class="dz-formats" aria-label="지원 형식"><span>PDF</span><span>XLSX · CSV</span><span>MD</span><span>JSON</span></span>
         <span class="dz-status" id="dzStatus" hidden></span>
       </label>
@@ -159,7 +159,7 @@
         <li>
           <span class="sn">1</span>
           <div><b>Google AI Studio 열기</b>
-            <p>Google 계정으로 로그인합니다. 처음이면 이용약관에 동의하세요.</p>
+            <p>Google 계정으로 로그인합니다. 처음이면 이용약관에 동의하세요. <b>학교(교육용) 계정은 관리자 정책으로 Gemini API가 막혀 있는 경우가 많으니 개인 Gmail 계정을 쓰세요.</b></p>
             <a class="link-btn" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"><span data-icon="link"></span>aistudio.google.com/apikey 열기</a>
           </div>
         </li>
@@ -206,6 +206,7 @@
           <li><b>요금</b> — 무료 등급으로도 사용할 수 있지만 분당·일일 사용량 제한이 있습니다. 한도 초과(429) 오류가 잦으면 <a href="https://ai.google.dev/gemini-api/docs/rate-limits" target="_blank" rel="noopener noreferrer">사용량 한도</a>를 확인하거나 AI Studio에서 결제를 연결하세요. <a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noopener noreferrer">요금 안내</a></li>
           <li><b>학생 자료</b> — 무료 등급은 입력이 Google 서비스 개선에 쓰일 수 있습니다. 실제 학생 생기부에는 <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer">결제(유료) 등급</a> 키를 권장합니다.</li>
           <li><b>키 보관</b> — 키는 이 브라우저에만 저장되고, 요청할 때 이 PC의 로컬 서버를 거쳐 Google로만 전달됩니다. 공용 PC에서는 ‘이번 탭에서만 사용’을 고르세요.</li>
+          <li><b>키가 거부되면</b> — 키가 올바른데도 ‘권한 없음’·‘프로젝트 접근 차단(403)’이 뜨면 학교·회사 계정 제한일 가능성이 큽니다. 학교 계정이 아닌 <b>개인 Google 계정</b>으로 로그인해 새 키를 만들어 보세요. (시크릿 창에서 로그인하면 계정이 섞이지 않습니다.)</li>
           <li><b>키가 새면</b> — <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">AI Studio</a>에서 해당 키를 삭제하고 새로 만드세요.</li>
         </ul>
       </details>

@@ -182,8 +182,9 @@ async function testKey(k) {
     return true;
   } catch (e) {
     const tip = /한도/.test(e.message) ? "무료 등급 한도일 수 있습니다. 1분 뒤 다시 시도하거나 결제를 연결하세요."
-      : /접근을 차단/.test(e.message) ? "키를 다시 붙여넣어도 해결되지 않습니다. 같은 프로젝트에서 새로 만든 키도 막힙니다. 다른 Google 계정의 새 프로젝트 키를 쓰거나 결제를 연결하세요."
-      : /키가 올바르지/.test(e.message) ? "AI Studio에서 키를 다시 복사해 붙여넣어 보세요. 삭제된 키는 사용할 수 없습니다."
+      : /접근을 차단/.test(e.message) ? "키를 다시 붙여넣어도 해결되지 않습니다. 학교 계정이 아닌 개인 Google 계정(시크릿 창에서 로그인 권장)으로 새 키를 만들어 시도해 보세요."
+      : /권한이 없습니다/.test(e.message) ? "키를 제대로 붙여넣었는데도 이 오류가 나면, 학교 계정이 아닌 개인 Google 계정으로 새 키를 만들어 시도해 보세요."
+      : /키가 올바르지/.test(e.message) ? "AI Studio에서 키를 다시 복사해 붙여넣어 보세요. 삭제된 키는 사용할 수 없습니다. 학교 계정 키라면 개인 계정 키로도 시도해 보세요."
       : /Failed to fetch|NetworkError/i.test(e.message) ? "로컬 서버(npm start)가 실행 중인지 확인하세요." : "";
     showTest("bad", esc(e.message), tip);
     return false;
@@ -307,7 +308,7 @@ async function handleFile(file) {
     if (kind === "pdf") {
       record = await parseSaenggibu(pdfjsLib, buf);
       record.meta.source = "pdf";
-      if (!recordCount(record)) throw new Error("생기부 형식을 인식하지 못했습니다. NEIS에서 출력한 학교생활기록부 PDF인지 확인하세요.");
+      if (!recordCount(record)) throw new Error("생기부 형식을 인식하지 못했습니다. NEIS에서 출력한 학교생활기록부 또는 개인별 대입전형자료 PDF인지 확인하세요.");
     } else if (kind === "json") {
       record = jsonToRecord(decodeText(buf), "json");
     } else if (kind === "md") {
