@@ -50,7 +50,8 @@ export function scrub(text, stats) {
 }
 
 // ---------- PDF → 페이지별 라인 ----------
-async function loadPages(pdfjsLib, data) {
+// opts.ocr(page): 글자 레이어가 없는 스캔 페이지를 OCR해 줄 텍스트 배열로 돌려준다 (ocr.js)
+async function loadPages(pdfjsLib, data, opts = {}) {
   const task = pdfjsLib.getDocument({ data, isEvalSupported: false });
   const doc = await task.promise;
   const pages = [];
@@ -68,11 +69,55 @@ async function loadPages(pdfjsLib, data) {
       if (y < HEADER_ZONE + 25 && RE.printDate.test(str)) continue; // 대입전형자료 상단 출력일자
       items.push({ str, x, y, w: it.width, page: p });
     }
-    pages.push({ no: p, height: vp.height, width: vp.width, lines: toLines(items) });
+    const scanned = items.length < 5 && !!opts.ocr;
+    opts.onProgress?.({ page: p, pages: doc.numPages, ocr: scanned });
+    pages.push({ no: p, height: vp.height, width: vp.width, lines: toLines(items), ocrText: scanned ? await opts.ocr(page) : null });
     page.cleanup();
   }
   await task.destroy();
   return pages;
+}
+
+// ---------- 스캔 PDF(OCR 텍스트) ----------
+// 글자 위치가 부정확해 표 구조는 복원하지 않고, 6개 영역의 줄만 골라 텍스트로 넘긴다.
+const SCAN_DROP = [
+  /성명/, // 꼬리말 반·번호·성명 칸
+  /번호.*반|반.*번호/,
+  /\d+\s*\/\s*\d+.*(년|고등학교)|(년|고등학교).*\d+\s*\/\s*\d+$/, // "OO고등학교 2026년 7월 10일 3 / 12"
+  /\d{1,2}:\d{2}\s*\//, // 출력 정보 "학교/2026.07.10 15:04/IP/출력자"
+  /\*{2,}/,
+];
+const SCAN_STOP = /^(?:\d{1,2}\.)?(?:인적|학적사항|출결상황|수상경력|자격증|독서활동상황|봉사활동실적|국가직무능력표준|학교폭력|정정대장)/;
+
+function scanSections(pages) {
+  const out = { creative: [], academic: [], behavior: [] };
+  let cur = null;
+  for (const pg of pages) {
+    for (const raw of pg.ocrText || []) {
+      const t = raw.replace(/[|ㅣ\[\]_~^`]+/g, " ").replace(/\s+/g, " ").trim();
+      const flat = t.replace(/\s/g, "");
+      if (!flat || flat.length < 2) continue;
+      if (RE.sec6.test(flat)) { cur = "creative"; continue; }
+      if (RE.sec7.test(flat)) { cur = "academic"; continue; }
+      if (RE.sec9.test(flat)) { cur = "behavior"; continue; }
+      if (SCAN_STOP.test(flat) || /봉사활동실적/.test(flat)) { cur = null; continue; }
+      if (!cur || SCAN_DROP.some((re) => re.test(t))) continue;
+      // 표 테두리·도장 등을 잘못 인식한 잡음 줄 (한글이 거의 없고 성적 숫자도 아닌 줄)
+      const hangul = (flat.match(/[가-힣]/g) || []).length;
+      const wordy = (flat.match(/[가-힣A-Za-z0-9]/g) || []).length;
+      if ((hangul < 2 && !/\d+\/\d/.test(flat)) || wordy < flat.length * 0.6) continue;
+      out[cur].push(t);
+    }
+  }
+  return out;
+}
+
+function scanToText(sec) {
+  const parts = [];
+  if (sec.creative.length) parts.push("## 창의적 체험활동상황", ...sec.creative);
+  if (sec.academic.length) parts.push("", "## 교과학습발달상황 (교과 성적 · 세부능력 및 특기사항)", ...sec.academic);
+  if (sec.behavior.length) parts.push("", "## 행동특성 및 종합의견", ...sec.behavior);
+  return parts.join("\n");
 }
 
 function toLines(items) {
@@ -464,8 +509,8 @@ function splitSections(pages) {
 }
 
 // ---------- 공개 API ----------
-export async function parseSaenggibu(pdfjsLib, data) {
-  const pages = await loadPages(pdfjsLib, data);
+export async function parseSaenggibu(pdfjsLib, data, opts) {
+  const pages = await loadPages(pdfjsLib, data, opts);
   const sec = splitSections(pages);
   const stats = { masked: 0 };
   const creative = parseCreative(sec.creative).map((r) => ({ ...r, text: scrub(r.text, stats) }));
@@ -478,6 +523,18 @@ export async function parseSaenggibu(pdfjsLib, data) {
     behavior,
     meta: { pages: pages.length, masked: stats.masked, warnings: [] },
   };
+  const ocrPages = pages.filter((p) => p.ocrText).length;
+  if (ocrPages) {
+    const text = scrub(scanToText(scanSections(pages)), stats);
+    record.meta.masked = stats.masked;
+    record.meta.ocrPages = ocrPages;
+    // 전부 스캔이면 영역별 텍스트를 그대로 전송하고, 일부만 스캔이면 '기타 자료'로 덧붙인다
+    if (ocrPages === pages.length) record.rawText = text;
+    else if (text) record.extraText = text;
+    record.meta.warnings.push(`스캔 PDF라 ${ocrPages}쪽을 글자 인식(OCR)으로 읽었습니다. 표는 줄글로 바뀌고 숫자·이름이 틀릴 수 있으니, 전송 전에 ‘추출 데이터’ 탭에서 내용을 확인·수정하세요.`);
+    if (!text) record.meta.warnings.push("스캔 페이지에서 6개 영역 제목을 찾지 못했습니다. 스캔 해상도를 높이거나 텍스트 PDF를 사용하세요.");
+    if (ocrPages === pages.length) return record;
+  }
   if (!creative.length) record.meta.warnings.push("창의적 체험활동상황을 찾지 못했습니다.");
   if (!grades.length) record.meta.warnings.push("교과 성적표를 찾지 못했습니다.");
   if (!seteuk.length) record.meta.warnings.push("세부능력 및 특기사항을 찾지 못했습니다.");

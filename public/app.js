@@ -1,5 +1,6 @@
 import * as pdfjsLib from "/vendor/pdf.min.mjs";
 import { parseSaenggibu, recordToText } from "/parser.js";
+import { makeOcr } from "/ocr.js";
 import { toPrintHtml, toText, toDocx, toHwpx } from "/exporters.js";
 import { recordCount, recordToJSON, jsonToRecord, recordToMarkdown, markdownToRecord, recordToWorkbook, workbookToRecord } from "/formats.js";
 
@@ -14,6 +15,21 @@ async function loadXLSX() {
     try { xlsxLib = await import(u); return xlsxLib; } catch (e) { console.warn("SheetJS load failed", u, e); }
   }
   throw new Error("엑셀 처리 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하세요.");
+}
+
+// 스캔 PDF 글자 인식(tesseract.js)도 스캔 페이지가 있을 때만 불러온다. 프로그램·한국어 모델만 내려받고, PDF 이미지는 이 브라우저 밖으로 나가지 않는다.
+const TESSERACT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.esm.min.js";
+function pdfOcr() {
+  let worker = null;
+  const getWorker = async () => {
+    if (worker) return worker;
+    let T;
+    try { T = await import(TESSERACT_URL); } catch { throw new Error("스캔 PDF 글자 인식 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하세요."); }
+    worker = await (T.default || T).createWorker("kor");
+    return worker;
+  };
+  const createCanvas = (w, h) => Object.assign(document.createElement("canvas"), { width: w, height: h });
+  return { ocr: makeOcr(getWorker, { createCanvas }), done: () => worker?.terminate() };
 }
 
 const FILE_KINDS = {
@@ -306,9 +322,15 @@ async function handleFile(file) {
     const buf = new Uint8Array(await file.arrayBuffer());
     let record;
     if (kind === "pdf") {
-      record = await parseSaenggibu(pdfjsLib, buf);
+      const { ocr, done } = pdfOcr();
+      try {
+        record = await parseSaenggibu(pdfjsLib, buf, {
+          ocr,
+          onProgress: (p) => { if (p.ocr) st.textContent = `스캔 PDF 글자 인식 중… ${p.page}/${p.pages}쪽 (처음에는 한국어 인식 모델을 내려받느라 더 걸립니다)`; },
+        });
+      } finally { await done(); }
       record.meta.source = "pdf";
-      if (!recordCount(record)) throw new Error("생기부 형식을 인식하지 못했습니다. NEIS에서 출력한 학교생활기록부 또는 개인별 대입전형자료 PDF인지 확인하세요.");
+      if (!recordCount(record) && !record.rawText?.trim()) throw new Error("생기부 형식을 인식하지 못했습니다. NEIS에서 출력한 학교생활기록부 또는 개인별 대입전형자료 PDF인지 확인하세요.");
     } else if (kind === "json") {
       record = jsonToRecord(decodeText(buf), "json");
     } else if (kind === "md") {
